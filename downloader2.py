@@ -11,7 +11,10 @@ import os
 import glob
 
 class EpisodeCopyAutomation:
-    def __init__(self, headless=False, images_folder="."):
+    def __init__(self, username, password, headless=False, images_folder="."):
+        self.username = username
+        self.password = password
+        
         options = webdriver.ChromeOptions()
         if headless:
             options.add_argument('--headless')
@@ -19,7 +22,6 @@ class EpisodeCopyAutomation:
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--start-maximized')
         options.add_argument('--disable-gpu')
-        options.add_argument('--log-level=3')
         
         # Set download directory
         prefs = {
@@ -33,42 +35,244 @@ class EpisodeCopyAutomation:
         
         try:
             self.driver = webdriver.Chrome(options=options)
-            self.wait = WebDriverWait(self.driver, 25)  # Increased wait time
+            self.wait = WebDriverWait(self.driver, 30)
             self.images_folder = os.path.abspath(images_folder)
+            self.logged_in = False
         except Exception as e:
             print(f"❌ Failed to initialize Chrome driver: {e}")
             raise
     
-    def navigate_to_copy_page(self, episode_id):
-        """Navigate to the specific episode copy page with better error handling"""
-        url = f"https://app.dev.portal.masjidal.com/system-admin/content/media/episode/copy/{episode_id}"
-        print(f"🌐 Navigating to: {url}")
+    def login(self, retries=3):
+        """Login to the portal with retry logic"""
+        login_url = "https://app.dev.portal.masjidal.com/login"
         
+        for attempt in range(retries):
+            try:
+                print(f"🔐 Attempting login (attempt {attempt + 1}/{retries})...")
+                
+                # Navigate to login page
+                self.driver.get(login_url)
+                time.sleep(3)
+                
+                # Wait for login form to load
+                print("⏳ Waiting for login form to load...")
+                email_field = self.wait.until(
+                    EC.element_to_be_clickable((By.NAME, "email"))
+                )
+                
+                # Fill in credentials
+                print("📝 Filling login credentials...")
+                email_field.clear()
+                email_field.send_keys(self.username)
+                
+                # Find and fill password field
+                password_field = self.driver.find_element(By.NAME, "password")
+                password_field.clear()
+                password_field.send_keys(self.password)
+                
+                # Click login button
+                print("🔑 Clicking login button...")
+                login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
+                login_button.click()
+                
+                # Wait for login to complete and check if successful
+                time.sleep(5)
+                
+                # Check if login was successful by looking for dashboard elements or checking URL
+                if self.check_login_success():
+                    print("✅ Login successful!")
+                    self.logged_in = True
+                    return True
+                else:
+                    print("❌ Login may have failed - checking for error messages...")
+                    
+                    # Check for login errors
+                    error_messages = [
+                        "//div[contains(@class, 'alert-danger')]",
+                        "//div[contains(@class, 'error')]",
+                        "//*[contains(text(), 'Invalid')]",
+                        "//*[contains(text(), 'incorrect')]",
+                        "//*[contains(text(), 'error')]"
+                    ]
+                    
+                    for error_xpath in error_messages:
+                        try:
+                            error_element = self.driver.find_element(By.XPATH, error_xpath)
+                            if error_element.is_displayed():
+                                print(f"❌ Login error: {error_element.text}")
+                        except:
+                            continue
+                    
+                    if attempt < retries - 1:
+                        print("🔄 Retrying login...")
+                        time.sleep(3)
+                        continue
+                    
+            except Exception as e:
+                print(f"❌ Login attempt {attempt + 1} failed: {str(e)}")
+                if attempt < retries - 1:
+                    print("🔄 Retrying login...")
+                    time.sleep(3)
+                    continue
+        
+        print("❌ All login attempts failed!")
+        return False
+    
+    def check_login_success(self):
+        """Check if login was successful"""
         try:
-            self.driver.get(url)
-            # Wait longer for page load
-            time.sleep(5)
+            # Check if we're redirected away from login page
+            current_url = self.driver.current_url
+            if "login" not in current_url and "dashboard" in current_url:
+                return True
             
-            # Wait for form to load - try multiple element indicators
-            form_indicators = [
-                (By.NAME, "title"),
-                (By.XPATH, "//h1[contains(text(), 'Edit Episode')]"),
-                (By.XPATH, "//h2[contains(text(), 'Episode Information')]")
+            # Check for dashboard elements
+            dashboard_indicators = [
+                "//*[contains(text(), 'Dashboard')]",
+                "//*[contains(text(), 'Welcome')]",
+                "//*[contains(@class, 'dashboard')]",
+                "//nav",  # Assuming there's a navigation menu after login
             ]
             
-            for by, selector in form_indicators:
+            for indicator in dashboard_indicators:
                 try:
-                    self.wait.until(EC.presence_of_element_located((by, selector)))
-                    print("✅ Form loaded successfully")
-                    return True
-                except TimeoutException:
+                    if self.driver.find_elements(By.XPATH, indicator):
+                        return True
+                except:
                     continue
             
-            print(f"❌ Form didn't load for episode {episode_id}")
+            # Check for logout button or user menu
+            logout_indicators = [
+                "//*[contains(text(), 'Logout')]",
+                "//*[contains(text(), 'Profile')]",
+                "//*[contains(@class, 'user-menu')]"
+            ]
+            
+            for indicator in logout_indicators:
+                try:
+                    if self.driver.find_elements(By.XPATH, indicator):
+                        return True
+                except:
+                    continue
+            
             return False
             
         except Exception as e:
-            print(f"❌ Navigation error for episode {episode_id}: {e}")
+            print(f"⚠ Error checking login status: {e}")
+            return False
+    
+    def ensure_logged_in(self):
+        """Ensure we're logged in, login if not"""
+        if self.logged_in:
+            return True
+        
+        # Check if we're already logged in by current URL or page content
+        current_url = self.driver.current_url
+        if "login" not in current_url:
+            # We might already be logged in
+            if self.check_login_success():
+                self.logged_in = True
+                return True
+        
+        # If not logged in, perform login
+        return self.login()
+    
+    def navigate_to_copy_page(self, episode_id, retries=3):
+        """Navigate to the specific episode copy page with retry logic"""
+        # Ensure we're logged in first
+        if not self.ensure_logged_in():
+            print("❌ Cannot navigate - not logged in")
+            return False
+        
+        url = f"https://app.dev.portal.masjidal.com/system-admin/content/media/episode/copy/{episode_id}"
+        print(f"🌐 Navigating to: {url}")
+        
+        for attempt in range(retries):
+            try:
+                self.driver.get(url)
+                # Wait for page to load
+                time.sleep(5)
+                
+                # Check if we got redirected to login (session expired)
+                if "login" in self.driver.current_url:
+                    print("⚠ Session expired, re-logging in...")
+                    self.logged_in = False
+                    if not self.ensure_logged_in():
+                        return False
+                    # Retry navigation after login
+                    continue
+                
+                # Check if page loaded successfully (not 404 or error)
+                if "404" in self.driver.title or "Error" in self.driver.title:
+                    print(f"❌ Page returned error for episode {episode_id}")
+                    return False
+                
+                # Wait for form to load - try multiple element indicators
+                form_indicators = [
+                    (By.NAME, "title"),
+                    (By.XPATH, "//h1[contains(text(), 'Edit Episode')]"),
+                    (By.XPATH, "//h2[contains(text(), 'Episode Information')]"),
+                    (By.XPATH, "//input[@name='title']")
+                ]
+                
+                for by, selector in form_indicators:
+                    try:
+                        element = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((by, selector))
+                        )
+                        if element:
+                            print(f"✅ Form loaded successfully for episode {episode_id} (attempt {attempt + 1})")
+                            return True
+                    except TimeoutException:
+                        continue
+                
+                print(f"⚠ Form not loaded on attempt {attempt + 1} for episode {episode_id}")
+                
+                # Try refreshing the page
+                if attempt < retries - 1:
+                    print("🔄 Refreshing page...")
+                    self.driver.refresh()
+                    time.sleep(3)
+                    
+            except Exception as e:
+                print(f"❌ Navigation error for episode {episode_id} (attempt {attempt + 1}): {e}")
+                if attempt < retries - 1:
+                    time.sleep(3)
+                    continue
+        
+        print(f"❌ Failed to load form for episode {episode_id} after {retries} attempts")
+        return False
+    
+    def check_if_episode_exists(self, episode_id):
+        """Check if an episode exists by trying to navigate to it"""
+        # Ensure we're logged in first
+        if not self.ensure_logged_in():
+            return False
+            
+        url = f"https://app.dev.portal.masjidal.com/system-admin/content/media/episode/copy/{episode_id}"
+        
+        try:
+            self.driver.get(url)
+            time.sleep(3)
+            
+            # Check if we got redirected to login
+            if "login" in self.driver.current_url:
+                return False
+                
+            # Check for 404 or error pages
+            page_source = self.driver.page_source.lower()
+            if "404" in page_source or "not found" in page_source or "error" in page_source:
+                return False
+                
+            # Check if form elements exist
+            try:
+                self.driver.find_element(By.NAME, "title")
+                return True
+            except:
+                return False
+                
+        except Exception as e:
+            print(f"Error checking episode {episode_id}: {e}")
             return False
     
     def find_image_for_episode(self, episode_number):
@@ -295,21 +499,6 @@ class EpisodeCopyAutomation:
         except Exception as e:
             print(f"⚠ Could not fill date field: {str(e)}")
     
-    def debug_form_state(self):
-        print("Debugging form state...")
-        try:
-            # Check all form fields
-            fields_to_check = ['title', 'episode_number', 'content_url']
-            for field in fields_to_check:
-                try:
-                    element = self.driver.find_element(By.NAME, field)
-                    value = element.get_attribute('value')
-                    print(f"  {field}: '{value}'")
-                except Exception as e:
-                    print(f"  {field}: not found - {e}")
-        except Exception as e:
-            print(f"Debug error: {e}")
-    
     def save_episode(self):
         """Click the save button and handle the response properly"""
         try:
@@ -332,7 +521,7 @@ class EpisodeCopyAutomation:
             save_button.click()
             
             # Wait for the save to process
-            time.sleep(8)  # Increased wait time
+            time.sleep(8)
             
             # Check for success or error
             return self.check_save_result()
@@ -398,7 +587,7 @@ class EpisodeCopyAutomation:
             
         except Exception as e:
             print(f"⚠ Error checking save result: {e}")
-            return True  # Default to success to continue
+            return True
     
     def handle_error_dialog(self):
         """Handle error dialogs that might appear after failed save"""
@@ -447,6 +636,16 @@ class EpisodeCopyAutomation:
             print(f"📁 Images folder: {self.images_folder}")
             print("=" * 60)
             
+            # First, let's check if the starting episode exists
+            print(f"🔍 Checking if episode {start_id} exists...")
+            if not self.check_if_episode_exists(start_id):
+                print(f"❌ Episode {start_id} does not exist or is not accessible!")
+                print("💡 Please check:")
+                print("   - Does episode 665 exist in the system?")
+                print("   - Do you have permission to access it?")
+                print("   - Is the URL correct?")
+                return 0
+            
             for index, row in df.iterrows():
                 if current_id > end_id:
                     print("🎯 Reached maximum episode ID")
@@ -464,11 +663,11 @@ class EpisodeCopyAutomation:
                 print(f"\n📍 Processing episode {current_id} - Excel row {index + 1}/{len(df)}")
                 print(f"   Episode: {episode_number}, Title: {row['Title']}")
                 
-                # Navigate to copy page
+                # Navigate to copy page with retry logic
                 if not self.navigate_to_copy_page(current_id):
                     print(f"❌ Failed to load page for episode {current_id}")
-                    current_id += 1
-                    continue
+                    print(f"💡 Cannot continue because episode {current_id + 1} requires episode {current_id} to exist!")
+                    break
                 
                 # Fill form with episode data and upload image
                 if self.fill_episode_form(row):
@@ -476,14 +675,16 @@ class EpisodeCopyAutomation:
                     if self.save_episode():
                         success_count += 1
                         print(f"✅ Successfully processed episode {current_id} (Episode {episode_number})")
+                        print(f"📝 This should have created episode {current_id + 1}")
                     else:
                         print(f"❌ Failed to save episode {current_id}")
+                        print(f"💡 Episode {current_id + 1} will not be created!")
                 else:
                     print(f"❌ Failed to fill form for episode {current_id}")
                 
                 current_id += 1
                 print(f"⏳ Waiting 4 seconds before next episode...")
-                time.sleep(4)  # Rate limiting between episodes
+                time.sleep(4)
             
             print(f"\n{'='*60}")
             print(f"🎉 BATCH COMPLETED: {success_count}/{len(df)} episodes processed successfully")
@@ -499,7 +700,7 @@ class EpisodeCopyAutomation:
         try:
             self.driver.quit()
         except:
-            pass  # Ignore errors during cleanup
+            pass
 
 # Main execution function
 def main():
@@ -513,17 +714,23 @@ def main():
         ]
     )
     
-    # Configuration
-    EXCEL_PATH = 'episodes.xlsx'  # Update with your Excel file path
-    IMAGES_FOLDER = os.path.expanduser('~/Downloads')  # Points to Downloads folder
-    START_ID = 665  # Start from 666 since 665 failed
+    # Configuration - UPDATE THESE WITH YOUR CREDENTIALS
+    USERNAME = "admin@gmail.com"  # Replace with your email
+    PASSWORD = "123456"            # Replace with your password
+    EXCEL_PATH = 'episodes.xlsx'
+    IMAGES_FOLDER = os.path.expanduser('~/Downloads')
+    START_ID = 665
     END_ID = 694
     
+    print(f"🔐 Login credentials: {USERNAME}")
     print(f"🔍 Looking for images in: {IMAGES_FOLDER}")
     
     automation = None
     try:
+        # Initialize automation with login credentials
         automation = EpisodeCopyAutomation(
+            username=USERNAME,
+            password=PASSWORD,
             headless=False,  # Keep visible for debugging
             images_folder=IMAGES_FOLDER
         )
