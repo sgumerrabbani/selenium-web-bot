@@ -1,34 +1,10 @@
-# selenium-web-bot
-
-A script that enters data from an excel file into a website.
-
-**VIDEO TUTORIAL/EXPLANIATION:**
-
-https://www.youtube.com/watch?v=S0FF1fgepwQ
-
-
-**Note:** This tutorial assumes you have:
-  1. Python 3.9.5 
-  2. pip3
-  3. Visual Studio Code (VSC)
-
-
-#### STEPS
-1. Change default profile within VSC:
-    * CTRL + SHIFT + P
-    * Search "Terminal: Select Default Profile"
-    * Click "Command Prompt" 
-   
-2. Create and activate the virtual environment + install library (run commands in a new CMD terminal)
-   1. py -m venv venv 
-      * (Creates virtual environment)
-   2. venv\Scripts\activate                   
-      * (activates virtual environment)
-   3. python -m pip install --upgrade pip     
-      * (Upgrade pip in virtual environment)
-   4. pip3 install -r requirements.txt
-      * (Install the required libraries for this project)
-   
-
-#### IMPORTANT
-A lot of other varaibles go into making a good web bot. I only covered a short list of them due to time and the nature of the website. If you are looking to improve the detection of a web bot you will need to research other areas such as rotating proxies. There are numerous of YT videos that explain this in detail.
+1) Organize and update episodes.xlsx with the corresponding series [remove first row!]
+2) download images using imager.py (ensure format matches and is saved in downloads folder)
+3) Create the first episode of the series and note the ID number
+4) ID number will be start_id in downloader2.py
+5) start_id + (total episodes-1) = end_id number in downloader2
+6) Double-check after the script has completed running to check if the inputs are accurate
+ 
+*there are 2 start ids and 2 end ids
+NOTE: CANNOT WORK WITH DUPLICATE IDS (IE EPISODES CREATED THEN DELETED LATER WILL CAUSE ISSUES)  if this happens contact Umer to fix
+NOTE: Laptop must be on (not in sleep mode otherwise selenium will terminate)
